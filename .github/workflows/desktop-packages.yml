@@ -36,22 +36,14 @@ env:
   PACKAGE_VERSION: 0.9.10-solo.3
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_NOLOGO: 1
-  CMAKE_BUILD_PARALLEL_LEVEL: 3
+  CMAKE_BUILD_PARALLEL_LEVEL: '3'
 
 jobs:
-  unix-desktop:
-    name: ${{ matrix.runtime }}
-    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || (github.event.inputs.platform == 'linux' && matrix.runtime == 'linux-x64') || (github.event.inputs.platform == 'macos' && matrix.runtime == 'osx-arm64') }}
+  linux-desktop:
+    name: linux-x64
+    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
     timeout-minutes: 90
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            runtime: linux-x64
-          - runner: macos-15
-            runtime: osx-arm64
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -86,7 +78,6 @@ jobs:
           if (-not (Test-Path source/MuMain/src/bin/Data/Local/mix.bmd)) { throw 'Game data layout unexpected.' }
 
       - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build pkg-config clang bison flex \
@@ -97,18 +88,14 @@ jobs:
             libwayland-dev libdecor-0-dev wayland-protocols libasound2-dev libpulse-dev \
             libdbus-1-dev libudev-dev xvfb xauth
 
-      - name: Install macOS build dependencies
-        if: runner.os == 'macOS'
-        run: brew install cmake ninja glew jpeg-turbo librime bison
-
       - name: Build, package and verify desktop applications
         shell: pwsh
-        run: ./source/OpenMU/tools/cloud-build/Build-CloudDesktop.ps1 -Runtime '${{ matrix.runtime }}'
+        run: ./source/OpenMU/tools/cloud-build/Build-CloudDesktop.ps1 -Runtime linux-x64
 
       - name: Upload unsigned package and verification results
         uses: actions/upload-artifact@v4
         with:
-          name: OpenMU-Solo-${{ matrix.runtime }}-unsigned
+          name: OpenMU-Solo-linux-x64-unsigned
           path: |
             dist/*.tar.gz
             dist/*.sha256
@@ -120,7 +107,74 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: build-diagnostics-${{ matrix.runtime }}
+          name: build-diagnostics-linux-x64
+          path: |
+            build-logs/
+            build-client/CMakeFiles/CMakeConfigureLog.yaml
+            build-client/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  macos-desktop:
+    name: osx-arm64
+    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' }}
+    timeout-minutes: 90
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Arrange source layout
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path source | Out-Null
+          Move-Item -LiteralPath MuMain, OpenMU -Destination source/
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download and verify game data (assets are not stored in this repo)
+        shell: pwsh
+        run: |
+          $tag = $env:MU_DATA_TAG
+          $base = "https://github.com/sven-n/MuMain/releases/download/$tag"
+          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz" -OutFile data.tar.gz
+          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz.sha256" -OutFile data.tar.gz.sha256
+          $expected = (Get-Content data.tar.gz.sha256 -Raw).Trim().Split()[0].ToUpperInvariant()
+          $actual = (Get-FileHash data.tar.gz -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($expected -ne $actual) { throw "Game data checksum mismatch: expected $expected, got $actual" }
+          New-Item -ItemType Directory -Path data-tmp | Out-Null
+          tar -xzf data.tar.gz -C data-tmp
+          Move-Item -LiteralPath data-tmp/Data -Destination source/MuMain/src/bin/Data
+          if (-not (Test-Path source/MuMain/src/bin/Data/Local/mix.bmd)) { throw 'Game data layout unexpected.' }
+
+      - name: Install macOS build dependencies
+        run: brew install cmake ninja glew jpeg-turbo librime bison
+
+      - name: Build, package and verify desktop applications
+        shell: pwsh
+        run: ./source/OpenMU/tools/cloud-build/Build-CloudDesktop.ps1 -Runtime osx-arm64
+
+      - name: Upload unsigned package and verification results
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenMU-Solo-osx-arm64-unsigned
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/verification.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics-osx-arm64
           path: |
             build-logs/
             build-client/CMakeFiles/CMakeConfigureLog.yaml
