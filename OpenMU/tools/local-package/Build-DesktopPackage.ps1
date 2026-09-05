@@ -102,6 +102,16 @@ foreach ($entry in @(
         '-p:ci=true', '-p:BuildInParallel=false', '-maxcpucount:1', '-p:RunAnalyzers=false',
         '-p:GeneratePersistenceModels=false', '-p:PersistenceGeneratorRunning=true', '-o', (Join-Path $output $entry[1]))
 }
+
+# .NET 的可选 LTTng 跟踪点提供器链接 liblttng-ust.so.0，新版发行版（如 Ubuntu
+# 24.04）已不再提供该旧 ABI；运行时缺少它完全正常工作。移除以保证发行包可移植，
+# 并通过打包的 ELF 依赖完整性校验。
+if (-not $IsWindows) {
+    foreach ($directory in @('App/GameHost', 'App/GMHost', 'App/Server')) {
+        $provider = Join-Path $output "$directory/libcoreclrtraceptprovider.so"
+        if (Test-Path -LiteralPath $provider) { Remove-Item -LiteralPath $provider -Force }
+    }
+}
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination (Join-Path $output 'Licenses/OpenMU-MIT.txt')
 Copy-Item -LiteralPath $license -Destination (Join-Path $output 'Licenses/PostgreSQL.txt')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'DESKTOP-README.txt') -Destination (Join-Path $output 'README.txt')
