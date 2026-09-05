@@ -63,6 +63,8 @@ jobs:
 
       - name: Download and verify game data (assets are not stored in this repo)
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $tag = $env:MU_DATA_TAG
           # 走 GitHub API 解析资源（runner 匿名直连 releases/download 会被 404）
@@ -145,6 +147,8 @@ jobs:
 
       - name: Download and verify game data (assets are not stored in this repo)
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $tag = $env:MU_DATA_TAG
           # 走 GitHub API 解析资源（runner 匿名直连 releases/download 会被 404）
@@ -223,6 +227,8 @@ jobs:
 
       - name: Download and verify game data (assets are not stored in this repo)
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $tag = $env:MU_DATA_TAG
           # 走 GitHub API 解析资源（runner 匿名直连 releases/download 会被 404）
