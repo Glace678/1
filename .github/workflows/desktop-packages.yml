@@ -65,9 +65,15 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:MU_DATA_TAG
-          $base = "https://github.com/sven-n/MuMain/releases/download/$tag"
-          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz" -OutFile data.tar.gz
-          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz.sha256" -OutFile data.tar.gz.sha256
+          # 走 GitHub API 解析资源（runner 匿名直连 releases/download 会被 404）
+          $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'openmu-solo-ci'; Accept = 'application/vnd.github+json' }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/sven-n/MuMain/releases/tags/$tag" -Headers $headers
+          foreach ($name in @("MuMain-data-$tag.tar.gz", "MuMain-data-$tag.tar.gz.sha256")) {
+            $asset = $release.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+            if (-not $asset) { throw "Game data asset not found in upstream release: $name" }
+            $out = if ($name.EndsWith('.sha256')) { 'data.tar.gz.sha256' } else { 'data.tar.gz' }
+            Invoke-WebRequest -Uri $asset.url -OutFile $out -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'openmu-solo-ci'; Accept = 'application/octet-stream' }
+          }
           $expected = (Get-Content data.tar.gz.sha256 -Raw).Trim().Split()[0].ToUpperInvariant()
           $actual = (Get-FileHash data.tar.gz -Algorithm SHA256).Hash.ToUpperInvariant()
           if ($expected -ne $actual) { throw "Game data checksum mismatch: expected $expected, got $actual" }
@@ -141,9 +147,15 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:MU_DATA_TAG
-          $base = "https://github.com/sven-n/MuMain/releases/download/$tag"
-          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz" -OutFile data.tar.gz
-          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz.sha256" -OutFile data.tar.gz.sha256
+          # 走 GitHub API 解析资源（runner 匿名直连 releases/download 会被 404）
+          $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'openmu-solo-ci'; Accept = 'application/vnd.github+json' }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/sven-n/MuMain/releases/tags/$tag" -Headers $headers
+          foreach ($name in @("MuMain-data-$tag.tar.gz", "MuMain-data-$tag.tar.gz.sha256")) {
+            $asset = $release.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+            if (-not $asset) { throw "Game data asset not found in upstream release: $name" }
+            $out = if ($name.EndsWith('.sha256')) { 'data.tar.gz.sha256' } else { 'data.tar.gz' }
+            Invoke-WebRequest -Uri $asset.url -OutFile $out -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'openmu-solo-ci'; Accept = 'application/octet-stream' }
+          }
           $expected = (Get-Content data.tar.gz.sha256 -Raw).Trim().Split()[0].ToUpperInvariant()
           $actual = (Get-FileHash data.tar.gz -Algorithm SHA256).Hash.ToUpperInvariant()
           if ($expected -ne $actual) { throw "Game data checksum mismatch: expected $expected, got $actual" }
@@ -213,9 +225,15 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:MU_DATA_TAG
-          $base = "https://github.com/sven-n/MuMain/releases/download/$tag"
-          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz" -OutFile data.tar.gz
-          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz.sha256" -OutFile data.tar.gz.sha256
+          # 走 GitHub API 解析资源（runner 匿名直连 releases/download 会被 404）
+          $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'openmu-solo-ci'; Accept = 'application/vnd.github+json' }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/sven-n/MuMain/releases/tags/$tag" -Headers $headers
+          foreach ($name in @("MuMain-data-$tag.tar.gz", "MuMain-data-$tag.tar.gz.sha256")) {
+            $asset = $release.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+            if (-not $asset) { throw "Game data asset not found in upstream release: $name" }
+            $out = if ($name.EndsWith('.sha256')) { 'data.tar.gz.sha256' } else { 'data.tar.gz' }
+            Invoke-WebRequest -Uri $asset.url -OutFile $out -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'openmu-solo-ci'; Accept = 'application/octet-stream' }
+          }
           $expected = (Get-Content data.tar.gz.sha256 -Raw).Trim().Split()[0].ToUpperInvariant()
           $actual = (Get-FileHash data.tar.gz -Algorithm SHA256).Hash.ToUpperInvariant()
           if ($expected -ne $actual) { throw "Game data checksum mismatch: expected $expected, got $actual" }
