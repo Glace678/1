@@ -1,0 +1,206 @@
+name: Desktop Packages
+
+# 三平台桌面软件包流水线（从本仓库源码直接构建，无需外部快照）：
+#   linux-x64  : OpenMU-Solo-linux-x64-unsigned.tar.gz   （游戏 + GM 双软件 + 内嵌 PostgreSQL）
+#   osx-arm64  : OpenMU-Solo-osx-arm64-unsigned.tar.gz   （含 .app 双包）
+#   win-x64    : OpenMU-Local-<ver>-win-x64.zip          （OpenMU-Local.exe 启动器 + 游戏 + 服务端 + 内嵌 PostgreSQL）
+# 游戏素材（Data/）不落仓库：构建时从上游 sven-n/MuMain 的 data 发布下载并校验 SHA256。
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Native platform to build
+        type: choice
+        default: all
+        options:
+          - all
+          - linux
+          - macos
+          - windows
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-packages-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  MU_DATA_TAG: data-7fce146eb3fe34a0
+  PACKAGE_VERSION: 0.9.10-solo.3
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+  CMAKE_BUILD_PARALLEL_LEVEL: 3
+
+jobs:
+  unix-desktop:
+    name: ${{ matrix.runtime }}
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || (inputs.platform == 'linux' && matrix.runtime == 'linux-x64') || (inputs.platform == 'macos' && matrix.runtime == 'osx-arm64') }}
+    timeout-minutes: 90
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            runtime: linux-x64
+          - runner: macos-15
+            runtime: osx-arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Arrange source layout
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path source | Out-Null
+          Move-Item -LiteralPath MuMain, OpenMU -Destination source/
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download and verify game data (assets are not stored in this repo)
+        shell: pwsh
+        run: |
+          $tag = $env:MU_DATA_TAG
+          $base = "https://github.com/sven-n/MuMain/releases/download/$tag"
+          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz" -OutFile data.tar.gz
+          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz.sha256" -OutFile data.tar.gz.sha256
+          $expected = (Get-Content data.tar.gz.sha256 -Raw).Trim().Split()[0].ToUpperInvariant()
+          $actual = (Get-FileHash data.tar.gz -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($expected -ne $actual) { throw "Game data checksum mismatch: expected $expected, got $actual" }
+          New-Item -ItemType Directory -Path data-tmp | Out-Null
+          tar -xzf data.tar.gz -C data-tmp
+          # 只取 Data/；fonts/ 用本仓库自带版本（含中文字体 Noto Sans CJK SC）
+          Move-Item -LiteralPath data-tmp/Data -Destination source/MuMain/src/bin/Data
+          if (-not (Test-Path source/MuMain/src/bin/Data/Local/mix.bmd)) { throw 'Game data layout unexpected.' }
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config clang bison flex \
+            zlib1g-dev libcurl4-openssl-dev libgl1-mesa-dev libglu1-mesa-dev libglew-dev \
+            libegl1-mesa-dev libturbojpeg0-dev librime-dev patchelf \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev libxfixes-dev \
+            libxrender-dev libxss-dev libxtst-dev libxkbcommon-dev libdrm-dev libgbm-dev \
+            libwayland-dev libdecor-0-dev wayland-protocols libasound2-dev libpulse-dev \
+            libdbus-1-dev libudev-dev xvfb xauth
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja glew jpeg-turbo librime bison
+
+      - name: Build, package and verify desktop applications
+        shell: pwsh
+        run: ./source/OpenMU/tools/cloud-build/Build-CloudDesktop.ps1 -Runtime '${{ matrix.runtime }}'
+
+      - name: Upload unsigned package and verification results
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenMU-Solo-${{ matrix.runtime }}-unsigned
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/verification.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics-${{ matrix.runtime }}
+          path: |
+            build-logs/
+            build-client/CMakeFiles/CMakeConfigureLog.yaml
+            build-client/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  windows-desktop:
+    name: win-x64
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows' }}
+    timeout-minutes: 120
+    runs-on: windows-2022
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Arrange source layout
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path source | Out-Null
+          Move-Item -LiteralPath MuMain, OpenMU -Destination source/
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up MSVC x64 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Download and verify game data (assets are not stored in this repo)
+        shell: pwsh
+        run: |
+          $tag = $env:MU_DATA_TAG
+          $base = "https://github.com/sven-n/MuMain/releases/download/$tag"
+          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz" -OutFile data.tar.gz
+          Invoke-WebRequest "$base/MuMain-data-$tag.tar.gz.sha256" -OutFile data.tar.gz.sha256
+          $expected = (Get-Content data.tar.gz.sha256 -Raw).Trim().Split()[0].ToUpperInvariant()
+          $actual = (Get-FileHash data.tar.gz -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($expected -ne $actual) { throw "Game data checksum mismatch: expected $expected, got $actual" }
+          New-Item -ItemType Directory -Path data-tmp | Out-Null
+          tar -xzf data.tar.gz -C data-tmp
+          Move-Item -LiteralPath data-tmp/Data -Destination source/MuMain/src/bin/Data
+          if (-not (Test-Path source/MuMain/src/bin/Data/Local/mix.bmd)) { throw 'Game data layout unexpected.' }
+
+      - name: Configure client (windows-x64 preset)
+        shell: pwsh
+        run: cmake --preset windows-x64
+        working-directory: source/MuMain
+
+      - name: Build client (Release)
+        shell: pwsh
+        run: cmake --build --preset windows-x64-release
+        working-directory: source/MuMain
+
+      - name: Package OpenMU-Local (game + server + GM launcher + PostgreSQL)
+        shell: pwsh
+        run: |
+          $mainExe = Get-ChildItem -Path source/MuMain/out/build/windows-x64 -Recurse -Filter Main.exe |
+            Sort-Object FullName | Select-Object -First 1
+          if (-not $mainExe) { throw 'Windows client build did not produce Main.exe.' }
+          $gameDir = $mainExe.DirectoryName
+          # 打包脚本要求发布目录内含干净模板；构建产物若只有 config.ini 则补一份模板
+          if (-not (Test-Path (Join-Path $gameDir 'config.ini.template'))) {
+            Copy-Item source/MuMain/src/bin/config.ini.template (Join-Path $gameDir 'config.ini.template')
+          }
+          ./source/OpenMU/tools/local-package/Build-LocalPackage.ps1 `
+            -GamePublishDirectory $gameDir `
+            -OutputDirectory dist `
+            -Version $env:PACKAGE_VERSION
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenMU-Local-win-x64-unsigned
+          path: |
+            dist/*.zip
+          if-no-files-found: error
+          retention-days: 14
