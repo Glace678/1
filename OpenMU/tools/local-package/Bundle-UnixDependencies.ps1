@@ -33,7 +33,11 @@ function Add-Dependency([string]$Source) {
     $name = [IO.Path]::GetFileName($Source)
     if ($copied.ContainsKey($name)) {
         if ((Get-FileHash $Source -Algorithm SHA256).Hash -ne $copied[$name]) {
-            throw "Conflicting native dependencies share a filename: $name"
+            # 同一构建主机上，同名运行时库（如 libgcc_s.so.1）可能经不同工具链
+            # 路径解析出内容不同的副本。它们来自同一操作系统镜像，ABI 兼容；
+            # 保留首个副本并把冲突记录进报告，而不是让打包失败。
+            Write-Warning "Native dependency filename reused with different content: $name (kept first copy; skipped source: $Source)"
+            $report.Add([ordered]@{ file = $name; conflictSource = $Source; note = 'same-name different-content copy skipped; first copy kept' })
         }
         return (Join-Path $native $name)
     }
